@@ -1,0 +1,43 @@
+[gd_resource type="Resource" script_class="Res_Root_Normal_UI" load_steps=2 format=3 uid="uid://bu66jpvbfnrgp"]
+
+[ext_resource type="Script" path="res://addons/bpb_placement/ui/res_root_normal_ui.gd" id="1_uo3yp"]
+
+[resource]
+script = ExtResource("1_uo3yp")
+data = [{
+"align_y": false,
+"item_list_items": ["res://assets/box.tscn", "res://assets/capsule.tscn"],
+"itemlist_column": 2.0,
+"last_selected_path": "",
+"placement_active": false,
+"rand_rotate_x": false,
+"rand_rotate_y": false,
+"rand_rotate_z": false,
+"scale_max": 1.0,
+"scale_min": 1.0,
+"tab_name": "hello"
+}, {
+"align_y": false,
+"item_list_items": ["res://assets/box.tscn"],
+"itemlist_column": 1.0,
+"last_selected_path": "",
+"placement_active": false,
+"rand_rotate_x": false,
+"rand_rotate_y": false,
+"rand_rotate_z": false,
+"scale_max": 1.0,
+"scale_min": 1.0,
+"tab_name": "Bolo"
+}, {
+"align_y": false,
+"item_list_items": ["res://addons/bpb_editor_walker/player/editor_player.tscn"],
+"itemlist_column": 3.0,
+"last_selected_path": "",
+"placement_active": false,
+"rand_rotate_x": false,
+"rand_rotate_y": false,
+"rand_rotate_z": false,
+"scale_max": 1.0,
+"scale_min": 1.0,
+"tab_name": "Editor_player"
+}]
