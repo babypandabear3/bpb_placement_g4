@@ -116,7 +116,7 @@ func _forward_3d_gui_input(viewport_camera, event):
 
 func do_normal(viewport_camera, event):
 	active_editor.set_mode_text("NORMAL")
-	if ghost:
+	if weakref(ghost).get_ref():
 		ghost.hide()
 		
 	if placement_options.is_empty():
