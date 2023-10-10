@@ -6,6 +6,8 @@ enum _MODE {
 	PLACEMENT,
 	ROTATE,
 	SCALE,
+	GSR_GRAB,
+	GSR_ROTATE,
 }
 
 enum _AXIS {
@@ -41,6 +43,10 @@ var rotation_z := 0.0
 var rotation_speed := 0.01
 
 var stop_input_passthrough = false
+
+var gsr_object = null
+var gsr_object_original_transform : Transform3D
+var gsr_obj_col_rid := []
 
 @onready var undo_redo := get_undo_redo()
 
@@ -80,7 +86,14 @@ func selection_change():
 				root_normal_ui_is_active = true
 				active_editor = root_normal_ui
 				active_root = selected
+		elif selected is Node3D:
+			gsr_object = selected
+			get_gsr_obj_col_rid()
+			remove_control_from_bottom_panel(root_normal_ui)
+			root_normal_ui_is_active = false
+			active_editor = null
 		else:
+			gsr_object = null
 			active_root = false
 			if root_normal_ui_is_active:
 				remove_control_from_bottom_panel(root_normal_ui)
@@ -90,10 +103,20 @@ func selection_change():
 func _handles(object):
 	if object is BPB_Root_Basic:
 		return true
+	elif object is Node3D:
+		return true
 		
+	gsr_object = null
 	return object == null
 	
 func _forward_3d_gui_input(viewport_camera, event):
+	if gsr_object:
+		if event is InputEventKey and event.pressed:
+			if event.keycode == KEY_G:
+				start_gsr_grab()
+			if event.keycode == KEY_R:
+				start_gsr_rotate()
+				
 	if active_editor:
 		placement_options = active_editor.get_placement_options()
 	else:
@@ -108,6 +131,10 @@ func _forward_3d_gui_input(viewport_camera, event):
 			do_rotate(viewport_camera, event)
 		_MODE.SCALE:
 			do_scale(viewport_camera, event)
+		_MODE.GSR_GRAB:
+			do_gsr_grab(viewport_camera, event)
+		_MODE.GSR_ROTATE:
+			do_gsr_rotate(viewport_camera, event)
 			
 	if stop_input_passthrough:
 		stop_input_passthrough = false
@@ -115,7 +142,9 @@ func _forward_3d_gui_input(viewport_camera, event):
 
 
 func do_normal(viewport_camera, event):
-	active_editor.set_mode_text("NORMAL")
+	if active_editor:
+		active_editor.set_mode_text("NORMAL")
+		
 	if weakref(ghost).get_ref():
 		ghost.hide()
 		
@@ -124,11 +153,15 @@ func do_normal(viewport_camera, event):
 	
 	if placement_options.placement_active:
 		mode = _MODE.PLACEMENT
-	
+		
+
 func do_placement(viewport_camera, event):
-	active_editor.set_mode_text("PLACEMENT")
+	if active_editor:
+		active_editor.set_mode_text("PLACEMENT")
+		
 	if not placement_options.placement_active:
 		mode = _MODE.NORMAL
+		
 	
 	if placement_options.last_selected_path == "":
 		return false
@@ -194,7 +227,8 @@ func do_placement(viewport_camera, event):
 			stop_input_passthrough = true
 			
 func do_rotate(viewport_camera, event):
-	active_editor.set_mode_text("ROTATION")
+	if active_editor:
+		active_editor.set_mode_text("ROTATION")
 	if event is InputEventKey and event.is_pressed():
 		if event.keycode == KEY_R:
 			mode = _MODE.PLACEMENT
@@ -280,6 +314,7 @@ func _intersect_with_colliders(camera, screen_point):
 	var space_state = editor_interface.get_edited_scene_root().get_world_3d().direct_space_state
 	
 	var query = PhysicsRayQueryParameters3D.create(from, from + dir * 4096)
+	query.exclude = gsr_obj_col_rid
 	var result = space_state.intersect_ray(query)
 	if result:
 		var res = {}
@@ -320,3 +355,84 @@ func execute_placement(obj, _ghost, _placement_options):
 func undo_placement(obj):
 	if weakref(obj).get_ref():
 		obj.queue_free()
+
+func start_gsr_grab():
+	gsr_object_original_transform = gsr_object.global_transform
+	mode = _MODE.GSR_GRAB
+	
+func do_gsr_grab(viewport_camera, event):
+	#active_editor.set_mode_text("GSR GRAB")
+	if event is InputEventMouseMotion:
+		var ray_result = _intersect_with_colliders(viewport_camera, event.position)
+		if ray_result:
+			gsr_object.global_transform.origin = ray_result.position
+	
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			commit_gsr()
+			mode = _MODE.NORMAL
+			stop_input_passthrough = true
+		if event.button_index == MOUSE_BUTTON_RIGHT:
+			mode = _MODE.NORMAL
+			gsr_object.global_transform = gsr_object_original_transform
+			stop_input_passthrough = true
+	
+func start_gsr_rotate():
+	gsr_object_original_transform = gsr_object.global_transform
+	mode = _MODE.GSR_ROTATE
+	axis = _AXIS.Y
+	
+func do_gsr_rotate(viewport_camera, event):
+	#active_editor.set_mode_text("GSR ROTATE")
+	pass
+	if event is InputEventKey and event.is_pressed():
+		if event.keycode == KEY_X:
+			axis = _AXIS.X
+		if event.keycode == KEY_Y:
+			axis = _AXIS.Y
+		if event.keycode == KEY_Z:
+			axis = _AXIS.Z
+			
+	elif event is InputEventMouseMotion:
+		if axis == _AXIS.X:
+			gsr_object.rotation.x += event.relative.x * rotation_speed
+		if axis == _AXIS.Y:
+			gsr_object.rotation.y += event.relative.x * rotation_speed
+		if axis == _AXIS.Z:
+			gsr_object.rotation.z += event.relative.x * rotation_speed
+			
+	elif event is InputEventMouseButton :# and event.is_pressed():
+		if event.button_index == MOUSE_BUTTON_LEFT:
+			commit_gsr()
+			mode = _MODE.NORMAL
+		elif event.button_index == MOUSE_BUTTON_RIGHT:
+			gsr_object.global_transform.basis = gsr_object_original_transform.basis
+			mode = _MODE.NORMAL
+		stop_input_passthrough = true
+
+func get_gsr_obj_col_rid():
+	if not gsr_object:
+		gsr_obj_col_rid = []
+	else:
+		gsr_obj_col_rid = []
+		get_gsc_cols_rid_recursive(gsr_object)
+		
+func get_gsc_cols_rid_recursive(node):
+	if node is CollisionObject3D:
+		gsr_obj_col_rid.append(node.get_rid())
+	for o in node.get_children():
+		get_gsc_cols_rid_recursive(o)
+	
+func commit_gsr():
+	var new_transform = gsr_object.global_transform
+	undo_redo.create_action("update_transform")
+	undo_redo.add_do_method(self, "execute_gsr", gsr_object, new_transform)
+	undo_redo.add_undo_method(self, "undo_gsr", gsr_object, gsr_object_original_transform)
+	undo_redo.add_do_reference(gsr_object)
+	undo_redo.commit_action()
+	
+func execute_gsr(obj, new_transform):
+	obj.global_transform = new_transform
+	
+func undo_gsr(obj, old_transform):
+	obj.global_transform = old_transform
