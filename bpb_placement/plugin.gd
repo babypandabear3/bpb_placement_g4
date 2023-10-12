@@ -50,8 +50,12 @@ var gsr_snap = false
 var gsr_snap_grab := Vector3.ONE
 var gsr_pivot : Transform3D
 var gsr_rotation_pivot : Vector3
+var gsr_rotation_offsets = {}
 var gsr_obj_col_rid := []
 
+var gsr_rotation : float
+
+@onready var gsr_snap_rotation = deg_to_rad(15.0)
 @onready var undo_redo := get_undo_redo()
 
 func _enter_tree():
@@ -90,14 +94,7 @@ func selection_change():
 				root_normal_ui_is_active = true
 				active_editor = root_normal_ui
 				active_root = selected
-		#elif selected is Node3D:
-		#	gsr_object = selected
-		#	get_gsr_obj_col_rid()
-		#	remove_control_from_bottom_panel(root_normal_ui)
-		#	root_normal_ui_is_active = false
-		#	active_editor = null
 		else:
-			#gsr_object = null
 			active_root = false
 			if root_normal_ui_is_active:
 				remove_control_from_bottom_panel(root_normal_ui)
@@ -156,9 +153,7 @@ func do_normal(viewport_camera, event):
 	if placement_options.placement_active:
 		mode = _MODE.PLACEMENT
 		
-	
 		
-
 func do_placement(viewport_camera, event):
 	if active_editor:
 		active_editor.set_mode_text("PLACEMENT")
@@ -364,7 +359,7 @@ func start_gsr_grab(camera : Camera3D):
 	var count := 0
 	gsr_objects = {}
 	for o in get_editor_interface().get_selection().get_selected_nodes():
-		if o is Node3D:
+		if o is Node3D and not o is BPB_Root_Basic:
 			gsr_pivot = o.global_transform
 			gsr_objects[o] = o.global_transform
 			count += 1
@@ -409,7 +404,7 @@ func start_gsr_rotate(camera):
 	gsr_objects = {}
 	gsr_rotation_pivot = Vector3.ZERO
 	for o in get_editor_interface().get_selection().get_selected_nodes():
-		if o is Node3D:
+		if o is Node3D and not o is BPB_Root_Basic:
 			gsr_pivot = o.global_transform
 			gsr_objects[o] = o.global_transform
 			count += 1
@@ -420,6 +415,11 @@ func start_gsr_rotate(camera):
 		gsr_rotation_pivot /= count
 		mode = _MODE.GSR_ROTATE
 		axis = _AXIS.Y
+		gsr_rotation = 0.0
+		gsr_rotation_offsets = {}
+		for o in gsr_objects.keys():
+			var offset = gsr_objects[o].origin - gsr_rotation_pivot
+			gsr_rotation_offsets[o] = offset
 	
 func do_gsr_rotate(viewport_camera, event):
 	if event is InputEventKey:
@@ -441,23 +441,32 @@ func do_gsr_rotate(viewport_camera, event):
 		if axis == _AXIS.X:
 			for gsr_object in gsr_objects.keys():
 				var gsr_rotation_angle = event.relative.x * rotation_speed
-				var rotation_target = gsr_object.rotation.y + gsr_rotation_angle
-				gsr_object.rotation.y = rotation_target
-				var offset = (gsr_object.global_position - gsr_rotation_pivot).rotated(Vector3.RIGHT, gsr_rotation_angle)
+				gsr_rotation += gsr_rotation_angle
+				var rotation = gsr_rotation
+				if gsr_snap:
+					rotation = snappedf(rotation, gsr_snap_rotation)
+				gsr_object.rotation.x = rotation
+				var offset = gsr_rotation_offsets[gsr_object].rotated(Vector3.RIGHT, rotation)
 				gsr_object.global_position = gsr_rotation_pivot + offset
 		if axis == _AXIS.Y:
 			for gsr_object in gsr_objects.keys():
 				var gsr_rotation_angle = event.relative.x * rotation_speed
-				var rotation_target = gsr_object.rotation.y + gsr_rotation_angle
-				gsr_object.rotation.y = rotation_target
-				var offset = (gsr_object.global_position - gsr_rotation_pivot).rotated(Vector3.UP, gsr_rotation_angle)
+				gsr_rotation += gsr_rotation_angle
+				var rotation = gsr_rotation
+				if gsr_snap:
+					rotation = snappedf(rotation, gsr_snap_rotation)
+				gsr_object.rotation.y = rotation
+				var offset = gsr_rotation_offsets[gsr_object].rotated(Vector3.UP, rotation)
 				gsr_object.global_position = gsr_rotation_pivot + offset
 		if axis == _AXIS.Z:
 			for gsr_object in gsr_objects.keys():
 				var gsr_rotation_angle = event.relative.x * rotation_speed
-				var rotation_target = gsr_object.rotation.y + gsr_rotation_angle
-				gsr_object.rotation.y = rotation_target
-				var offset = (gsr_object.global_position - gsr_rotation_pivot).rotated(Vector3.FORWARD, gsr_rotation_angle)
+				gsr_rotation += gsr_rotation_angle
+				var rotation = gsr_rotation
+				if gsr_snap:
+					rotation = snappedf(rotation, gsr_snap_rotation)
+				gsr_object.rotation.z = rotation
+				var offset = gsr_rotation_offsets[gsr_object].rotated(Vector3.FORWARD, rotation)
 				gsr_object.global_position = gsr_rotation_pivot + offset
 			
 	elif event is InputEventMouseButton :# and event.is_pressed():
