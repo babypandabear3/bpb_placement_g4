@@ -14,6 +14,10 @@ enum _AXIS {
 	X,
 	Y,
 	Z,
+	SNAP,
+	PLANE_XY,
+	PLANE_XZ,
+	PLANE_YZ,
 }
 
 var root_normal_ui
@@ -51,6 +55,7 @@ var gsr_snap_grab := Vector3.ONE
 var gsr_pivot : Transform3D
 var gsr_rotation_pivot : Vector3
 var gsr_rotation_offsets = {}
+var gsr_rotation_original_transform = {}
 var gsr_obj_col_rid := []
 
 var gsr_rotation : float
@@ -293,10 +298,11 @@ func do_scale(viewport_camera, event):
 		stop_input_passthrough = true
 			
 func disable_ghost_collider(node):
-	for obj in node.get_children():
-		disable_ghost_collider(obj)
-		if obj is CollisionShape3D:
-			obj.free()
+	gsr_obj_col_rid = []
+	
+	var kids = node.find_children("*", "CollisionObject3D")
+	for k in kids:
+		gsr_obj_col_rid.append(k.get_rid())
 		
 func create_ghost(path):
 	ghost_path = path
@@ -321,6 +327,14 @@ func _intersect_with_colliders(camera, screen_point):
 		res.normal = result.normal
 		return res
 	return null
+	
+func _intersect_with_plane(camera, screen_point, plane_origin, plane_normal):
+	var grid_plane = Plane(plane_normal, plane_origin)
+	var from = camera.project_ray_origin(screen_point)
+	var dir = camera.project_ray_normal(screen_point)
+	
+	var result = grid_plane.intersects_ray(from, dir)
+	return result
 
 func place_object(_ghost, _placement_options):
 	var obj = load(ghost_path).instantiate()
@@ -367,9 +381,11 @@ func start_gsr_grab(camera : Camera3D):
 	if count == 0:
 		return
 	else:
+		get_gsr_obj_col_rid()
 		var mouse_pos = camera.unproject_position(gsr_pivot.origin)
 		camera.get_viewport().warp_mouse(mouse_pos)
 		mode = _MODE.GSR_GRAB
+		axis = _AXIS.SNAP
 	
 func do_gsr_grab(viewport_camera, event):
 	if event is InputEventKey:
@@ -379,15 +395,89 @@ func do_gsr_grab(viewport_camera, event):
 			if event.is_released():
 				gsr_snap = false
 				
+		if event.is_pressed():
+			if event.keycode == KEY_X:
+				if event.shift_pressed:
+					axis = _AXIS.PLANE_YZ
+				else:
+					axis = _AXIS.X
+			if event.keycode == KEY_Y:
+				if event.shift_pressed:
+					axis = _AXIS.PLANE_XZ
+				else:
+					axis = _AXIS.Y
+			if event.keycode == KEY_Z:
+				if event.shift_pressed:
+					axis = _AXIS.PLANE_XY
+				else:
+					axis = _AXIS.Z
+			if event.keycode == KEY_S:
+				axis = _AXIS.SNAP
+				
 	if event is InputEventMouseMotion:
-		var ray_result = _intersect_with_colliders(viewport_camera, event.position)
-		if ray_result:
-			var offset : Vector3 = ray_result.position - gsr_pivot.origin 
-			if gsr_snap:
-				offset = offset.snapped(gsr_snap_grab)
-			for node in gsr_objects.keys():
-				node.global_transform.origin = gsr_objects[node].origin + offset
-	
+		match axis:
+			_AXIS.SNAP:
+				var ray_result = _intersect_with_colliders(viewport_camera, event.position)
+				if ray_result:
+					var offset : Vector3 = ray_result.position - gsr_pivot.origin 
+					if gsr_snap:
+						offset = offset.snapped(gsr_snap_grab)
+					for node in gsr_objects.keys():
+						node.global_transform.origin = gsr_objects[node].origin + offset
+			_AXIS.X:
+				var ray_result = _intersect_with_plane(viewport_camera, event.position, gsr_pivot.origin, viewport_camera.global_transform.basis.z)
+				if ray_result:
+					var movement : Vector3 = ray_result - gsr_pivot.origin 
+					var offset = movement.project(Vector3.RIGHT)
+					if gsr_snap:
+						offset = offset.snapped(gsr_snap_grab)
+					for node in gsr_objects.keys():
+						node.global_transform.origin = gsr_objects[node].origin + offset
+			_AXIS.Y:
+				var ray_result = _intersect_with_plane(viewport_camera, event.position, gsr_pivot.origin, viewport_camera.global_transform.basis.z)
+				if ray_result:
+					var movement : Vector3 = ray_result - gsr_pivot.origin 
+					var offset = movement.project(Vector3.UP)
+					if gsr_snap:
+						offset = offset.snapped(gsr_snap_grab)
+					for node in gsr_objects.keys():
+						node.global_transform.origin = gsr_objects[node].origin + offset
+			_AXIS.Z:
+				var ray_result = _intersect_with_plane(viewport_camera, event.position, gsr_pivot.origin, viewport_camera.global_transform.basis.z)
+				if ray_result:
+					var movement : Vector3 = ray_result - gsr_pivot.origin 
+					var offset = movement.project(Vector3.FORWARD)
+					if gsr_snap:
+						offset = offset.snapped(gsr_snap_grab)
+					for node in gsr_objects.keys():
+						node.global_transform.origin = gsr_objects[node].origin + offset
+			_AXIS.PLANE_YZ:
+				var ray_result = _intersect_with_plane(viewport_camera, event.position, gsr_pivot.origin, viewport_camera.global_transform.basis.z)
+				if ray_result:
+					var movement : Vector3 = ray_result - gsr_pivot.origin 
+					var offset = movement.slide(Vector3.RIGHT)
+					if gsr_snap:
+						offset = offset.snapped(gsr_snap_grab)
+					for node in gsr_objects.keys():
+						node.global_transform.origin = gsr_objects[node].origin + offset
+			_AXIS.PLANE_XZ:
+				var ray_result = _intersect_with_plane(viewport_camera, event.position, gsr_pivot.origin, viewport_camera.global_transform.basis.z)
+				if ray_result:
+					var movement : Vector3 = ray_result - gsr_pivot.origin 
+					var offset = movement.slide(Vector3.UP)
+					if gsr_snap:
+						offset = offset.snapped(gsr_snap_grab)
+					for node in gsr_objects.keys():
+						node.global_transform.origin = gsr_objects[node].origin + offset
+			_AXIS.PLANE_XY:
+				var ray_result = _intersect_with_plane(viewport_camera, event.position, gsr_pivot.origin, viewport_camera.global_transform.basis.z)
+				if ray_result:
+					var movement : Vector3 = ray_result - gsr_pivot.origin 
+					var offset = movement.slide(Vector3.FORWARD)
+					if gsr_snap:
+						offset = offset.snapped(gsr_snap_grab)
+					for node in gsr_objects.keys():
+						node.global_transform.origin = gsr_objects[node].origin + offset
 	if event is InputEventMouseButton and event.pressed:
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			commit_gsr()
@@ -412,6 +502,7 @@ func start_gsr_rotate(camera):
 	if count == 0:
 		return
 	else:
+		get_gsr_obj_col_rid()
 		gsr_rotation_pivot /= count
 		mode = _MODE.GSR_ROTATE
 		axis = _AXIS.Y
@@ -420,6 +511,7 @@ func start_gsr_rotate(camera):
 		for o in gsr_objects.keys():
 			var offset = gsr_objects[o].origin - gsr_rotation_pivot
 			gsr_rotation_offsets[o] = offset
+			gsr_rotation_original_transform[o] = o.global_transform
 	
 func do_gsr_rotate(viewport_camera, event):
 	if event is InputEventKey:
@@ -445,9 +537,11 @@ func do_gsr_rotate(viewport_camera, event):
 				var rotation = gsr_rotation
 				if gsr_snap:
 					rotation = snappedf(rotation, gsr_snap_rotation)
-				gsr_object.rotation.x = rotation
 				var offset = gsr_rotation_offsets[gsr_object].rotated(Vector3.RIGHT, rotation)
 				gsr_object.global_position = gsr_rotation_pivot + offset
+				var bas = gsr_rotation_original_transform[gsr_object].basis
+				bas = bas.rotated(Vector3.RIGHT, rotation)
+				gsr_object.global_transform.basis = bas
 		if axis == _AXIS.Y:
 			for gsr_object in gsr_objects.keys():
 				var gsr_rotation_angle = event.relative.x * rotation_speed
@@ -455,9 +549,11 @@ func do_gsr_rotate(viewport_camera, event):
 				var rotation = gsr_rotation
 				if gsr_snap:
 					rotation = snappedf(rotation, gsr_snap_rotation)
-				gsr_object.rotation.y = rotation
 				var offset = gsr_rotation_offsets[gsr_object].rotated(Vector3.UP, rotation)
 				gsr_object.global_position = gsr_rotation_pivot + offset
+				var bas = gsr_rotation_original_transform[gsr_object].basis
+				bas = bas.rotated(Vector3.UP, rotation)
+				gsr_object.global_transform.basis = bas
 		if axis == _AXIS.Z:
 			for gsr_object in gsr_objects.keys():
 				var gsr_rotation_angle = event.relative.x * rotation_speed
@@ -465,9 +561,11 @@ func do_gsr_rotate(viewport_camera, event):
 				var rotation = gsr_rotation
 				if gsr_snap:
 					rotation = snappedf(rotation, gsr_snap_rotation)
-				gsr_object.rotation.z = rotation
 				var offset = gsr_rotation_offsets[gsr_object].rotated(Vector3.FORWARD, rotation)
 				gsr_object.global_position = gsr_rotation_pivot + offset
+				var bas = gsr_rotation_original_transform[gsr_object].basis
+				bas = bas.rotated(Vector3.FORWARD, rotation)
+				gsr_object.global_transform.basis = bas
 			
 	elif event is InputEventMouseButton :# and event.is_pressed():
 		if event.button_index == MOUSE_BUTTON_LEFT:
@@ -480,17 +578,12 @@ func do_gsr_rotate(viewport_camera, event):
 		stop_input_passthrough = true
 
 func get_gsr_obj_col_rid():
-	if not gsr_object:
-		gsr_obj_col_rid = []
-	else:
-		gsr_obj_col_rid = []
-		get_gsc_cols_rid_recursive(gsr_object)
-		
-func get_gsc_cols_rid_recursive(node):
-	if node is CollisionObject3D:
-		gsr_obj_col_rid.append(node.get_rid())
-	for o in node.get_children():
-		get_gsc_cols_rid_recursive(o)
+	gsr_obj_col_rid = []
+	for node in gsr_objects.keys():
+		var kids = node.find_children("*", "CollisionObject3D")
+		for k in kids:
+			gsr_obj_col_rid.append(k.get_rid())
+	
 	
 func commit_gsr():
 	undo_redo.create_action("update_transform")
