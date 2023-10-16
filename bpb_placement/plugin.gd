@@ -51,7 +51,7 @@ var stop_input_passthrough = false
 var gsr_object = null
 var gsr_objects = {}
 var gsr_snap = false
-var gsr_snap_grab := Vector3.ONE
+var gsr_snap_grab := Vector3.ONE * 0.5
 var gsr_pivot : Transform3D
 var gsr_rotation_pivot : Vector3
 var gsr_rotation_offsets = {}
@@ -156,14 +156,19 @@ func do_normal(viewport_camera, event):
 		return false
 	
 	if placement_options.placement_active:
-		mode = _MODE.PLACEMENT
+		start_placement()
 		
 		
+func start_placement():
+	axis = _AXIS.SNAP
+	mode = _MODE.PLACEMENT
+	
 func do_placement(viewport_camera, event):
 	if active_editor:
 		active_editor.set_mode_text("PLACEMENT")
 		
-	if not placement_options.placement_active:
+	var is_placement_active = placement_options.get("placement_active")
+	if not is_placement_active:
 		mode = _MODE.NORMAL
 		
 	
@@ -174,20 +179,116 @@ func do_placement(viewport_camera, event):
 		create_ghost(placement_options.last_selected_path)
 	ghost.show()
 	
-	if event is InputEventMouseMotion:
-		event_last_position = get_viewport().get_mouse_position()
-		var ray_result = _intersect_with_colliders(viewport_camera, event.position)
-		if ray_result:
-			ghost.global_transform.origin = ray_result.position
-			if placement_options.align_y:
-				var bas = ghost.global_transform.basis
-				bas.y = ray_result.normal
-				bas.x = bas.x.slide(bas.y).normalized()
-				bas.z = bas.x.cross(bas.y)
-				ghost.global_transform.basis = bas
+	if event is InputEventKey:
+		if event.keycode == KEY_CTRL:
+			if event.is_pressed():
+				gsr_snap = true
+			if event.is_released():
+				gsr_snap = false
 				
-		else:
-			ghost.hide()
+		if event.is_pressed():
+			if event.keycode == KEY_X:
+				if event.shift_pressed:
+					axis = _AXIS.PLANE_YZ
+					gsr_pivot = ghost.global_transform
+				else:
+					if axis == _AXIS.X:
+						axis = _AXIS.SNAP
+					else:
+						axis = _AXIS.X
+						gsr_pivot = ghost.global_transform
+			if event.keycode == KEY_Y:
+				if event.shift_pressed:
+					axis = _AXIS.PLANE_XZ
+					gsr_pivot = ghost.global_transform
+				else:
+					if axis == _AXIS.Y:
+						axis = _AXIS.SNAP
+					else:
+						axis = _AXIS.Y
+						gsr_pivot = ghost.global_transform
+			if event.keycode == KEY_Z:
+				if event.shift_pressed:
+					axis = _AXIS.PLANE_XY
+					gsr_pivot = ghost.global_transform
+				else:
+					if axis == _AXIS.Z:
+						axis = _AXIS.SNAP
+					else:
+						axis = _AXIS.Z
+						gsr_pivot = ghost.global_transform
+			if event.keycode == KEY_S:
+				axis = _AXIS.SNAP
+				
+	if event is InputEventMouseMotion:
+		match axis:
+			_AXIS.SNAP:
+				event_last_position = get_viewport().get_mouse_position()
+				var ray_result = _intersect_with_colliders(viewport_camera, event.position)
+				if ray_result:
+					var offset : Vector3 = ray_result.position
+					if gsr_snap:
+						offset = offset.snapped(gsr_snap_grab)
+					ghost.global_transform.origin = offset
+					if placement_options.align_y:
+						var bas = ghost.global_transform.basis
+						var z = viewport_camera.global_transform.basis.z.slide(ray_result.normal)
+						var y = ray_result.normal
+						var x = y.cross(z)
+						ghost.global_transform.basis = Basis(x, y, z).orthonormalized()
+
+			_AXIS.X:
+				var ray_result = _intersect_with_plane(viewport_camera, event.position, gsr_pivot.origin, viewport_camera.global_transform.basis.z)
+				if ray_result:
+					var movement : Vector3 = ray_result - gsr_pivot.origin 
+					var offset = movement.project(Vector3.RIGHT)
+					if gsr_snap:
+						offset = offset.snapped(gsr_snap_grab)
+					ghost.global_transform.origin = gsr_pivot.origin + offset
+			_AXIS.Y:
+				var ray_result = _intersect_with_plane(viewport_camera, event.position, gsr_pivot.origin, viewport_camera.global_transform.basis.z)
+				if ray_result:
+					var movement : Vector3 = ray_result - gsr_pivot.origin 
+					var offset = movement.project(Vector3.UP)
+					if gsr_snap:
+						offset = offset.snapped(gsr_snap_grab)
+					ghost.global_transform.origin = gsr_pivot.origin + offset
+			_AXIS.Z:
+				var ray_result = _intersect_with_plane(viewport_camera, event.position, gsr_pivot.origin, viewport_camera.global_transform.basis.z)
+				if ray_result:
+					var movement : Vector3 = ray_result - gsr_pivot.origin 
+					var offset = movement.project(Vector3.FORWARD)
+					if gsr_snap:
+						offset = offset.snapped(gsr_snap_grab)
+					ghost.global_transform.origin = gsr_pivot.origin + offset
+			#		
+			_AXIS.PLANE_YZ:
+				var ray_result = _intersect_with_plane(viewport_camera, event.position, gsr_pivot.origin, viewport_camera.global_transform.basis.z)
+				if ray_result:
+					var movement : Vector3 = ray_result - gsr_pivot.origin
+					var offset = movement.slide(Vector3.RIGHT)
+					if gsr_snap:
+						offset = offset.snapped(gsr_snap_grab)
+					ghost.global_transform.origin = gsr_pivot.origin + offset
+					
+			_AXIS.PLANE_XZ:
+				var ray_result = _intersect_with_plane(viewport_camera, event.position, gsr_pivot.origin, viewport_camera.global_transform.basis.z)
+				if ray_result:
+					var movement : Vector3 = ray_result - gsr_pivot.origin
+					var offset = movement.slide(Vector3.UP)
+					if gsr_snap:
+						offset = offset.snapped(gsr_snap_grab)
+					ghost.global_transform.origin = gsr_pivot.origin + offset
+					
+			_AXIS.PLANE_XY:
+				var ray_result = _intersect_with_plane(viewport_camera, event.position, gsr_pivot.origin, viewport_camera.global_transform.basis.z)
+				if ray_result:
+					var movement : Vector3 = ray_result - gsr_pivot.origin
+					var offset = movement.slide(Vector3.FORWARD)
+					if gsr_snap:
+						offset = offset.snapped(gsr_snap_grab)
+					ghost.global_transform.origin = gsr_pivot.origin + offset
+	
 			
 	elif event is InputEventKey and event.is_pressed():
 		if event.keycode == KEY_R:
@@ -346,9 +447,11 @@ func place_object(_ghost, _placement_options):
 	undo_redo.commit_action()
 	
 func execute_placement(obj, _ghost, _placement_options):
+	var obj_name = obj.name
 	active_root.add_child(obj)
 	obj.global_transform = _ghost.global_transform
 	obj.owner = editor_interface.get_edited_scene_root()
+	obj.name = obj_name
 	
 	if _placement_options["rand_rotate_x"]:
 		obj.rotation.x += randf_range(-PI, PI)
