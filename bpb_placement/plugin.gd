@@ -48,7 +48,6 @@ var rotation_speed := 0.01
 
 var stop_input_passthrough = false
 
-var gsr_object = null
 var gsr_objects = {}
 var gsr_snap = false
 var gsr_snap_grab := Vector3.ONE * 0.5
@@ -58,21 +57,21 @@ var gsr_rotation_offsets = {}
 var gsr_rotation_original_transform = {}
 var gsr_obj_col_rid := []
 
+var placement_rotation_init = Vector3.ZERO
 var gsr_rotation : float
-
+var prev_axis = _AXIS.Y
 @onready var gsr_snap_rotation = deg_to_rad(15.0)
-@onready var undo_redo := get_undo_redo()
+var undo_redo : EditorUndoRedoManager
 
 func _enter_tree():
 	pass
+	undo_redo = get_undo_redo()
 	add_custom_type("RootBasic", "Node3D", preload("root_node/root_basic.gd"), preload("res://addons/bpb_placement/icon/circleG.png"))
 	root_normal_ui = load("res://addons/bpb_placement/ui/root_normal_ui.tscn").instantiate()
 	editor_interface = get_editor_interface()
 	editor_selection = get_editor_interface().get_selection()
 	editor_selection.selection_changed.connect(Callable(self, "selection_change"))
-	
 	root_normal_ui.editor_interface = editor_interface
-	
 	
 func _exit_tree():
 	pass
@@ -105,6 +104,7 @@ func selection_change():
 				remove_control_from_bottom_panel(root_normal_ui)
 				root_normal_ui_is_active = false
 				active_editor = null
+				
 
 func _handles(object):
 	if object is BPB_Root_Basic:
@@ -112,7 +112,6 @@ func _handles(object):
 	elif object is Node3D:
 		return true
 		
-	gsr_object = null
 	return object == null
 	
 func _forward_3d_gui_input(viewport_camera, event):
@@ -129,8 +128,17 @@ func _forward_3d_gui_input(viewport_camera, event):
 					start_gsr_grab(viewport_camera)
 				if event.keycode == KEY_R:
 					start_gsr_rotate(viewport_camera)
+					
+			if event is InputEventKey:
+				if event.keycode == KEY_SPACE and event.alt_pressed and event.pressed:
+					root_normal_ui.toggle_placement()
+					stop_input_passthrough = true
 		_MODE.PLACEMENT:
 			do_placement(viewport_camera, event)
+			if event is InputEventKey:
+				if event.keycode == KEY_SPACE and event.alt_pressed and event.pressed:
+					root_normal_ui.toggle_placement()
+					stop_input_passthrough = true
 		_MODE.ROTATE:
 			do_rotate(viewport_camera, event)
 		_MODE.SCALE:
@@ -160,6 +168,7 @@ func do_normal(viewport_camera, event):
 		
 		
 func start_placement():
+	prev_axis = _AXIS.SNAP
 	axis = _AXIS.SNAP
 	mode = _MODE.PLACEMENT
 	
@@ -170,7 +179,6 @@ func do_placement(viewport_camera, event):
 	var is_placement_active = placement_options.get("placement_active")
 	if not is_placement_active:
 		mode = _MODE.NORMAL
-		
 	
 	if placement_options.last_selected_path == "":
 		return false
@@ -212,11 +220,12 @@ func do_placement(viewport_camera, event):
 					axis = _AXIS.PLANE_XY
 					gsr_pivot = ghost.global_transform
 				else:
-					if axis == _AXIS.Z:
-						axis = _AXIS.SNAP
-					else:
-						axis = _AXIS.Z
-						gsr_pivot = ghost.global_transform
+					if not event.ctrl_pressed:
+						if axis == _AXIS.Z:
+							axis = _AXIS.SNAP
+						else:
+							axis = _AXIS.Z
+							gsr_pivot = ghost.global_transform
 			if event.keycode == KEY_S:
 				axis = _AXIS.SNAP
 				
@@ -231,11 +240,8 @@ func do_placement(viewport_camera, event):
 						offset = offset.snapped(gsr_snap_grab)
 					ghost.global_transform.origin = offset
 					if placement_options.align_y:
-						var bas = ghost.global_transform.basis
-						var z = viewport_camera.global_transform.basis.z.slide(ray_result.normal)
-						var y = ray_result.normal
-						var x = y.cross(z)
-						ghost.global_transform.basis = Basis(x, y, z).orthonormalized()
+						var basis = get_ghost_basis_align_y(ray_result) 
+						ghost.global_transform.basis = basis
 
 			_AXIS.X:
 				var ray_result = _intersect_with_plane(viewport_camera, event.position, gsr_pivot.origin, viewport_camera.global_transform.basis.z)
@@ -290,7 +296,7 @@ func do_placement(viewport_camera, event):
 					ghost.global_transform.origin = gsr_pivot.origin + offset
 	
 			
-	elif event is InputEventKey and event.is_pressed():
+	if event is InputEventKey and event.is_pressed():
 		if event.keycode == KEY_R:
 			if event.alt_pressed:
 				#reset rotation 
@@ -303,30 +309,33 @@ func do_placement(viewport_camera, event):
 			else:
 				#enter rotation mode
 				ghost_initial_transform = ghost.global_transform
+				prev_axis = axis
 				axis = _AXIS.Y
 				mode = _MODE.ROTATE
+				placement_rotation_init = ghost.rotation
 				rotation_x = 0.0 
 				rotation_y = 0.0
 				rotation_z = 0.0
-		if event.keycode == KEY_S:
-			if event.alt_pressed:
-				#reset scale
-				var bas = ghost.global_transform.basis
-				bas.x = bas.x.normalized()
-				bas.y = bas.y.normalized()
-				bas.z = bas.z.normalized()
-				ghost.global_transform.basis = bas
-			else:
-				#enter scale mode
-				ghost_initial_transform = ghost.global_transform
-				ghost_last_scale = ghost.global_transform.basis.x.length()
-				if (get_viewport().get_visible_rect().size.x / 2) > event_last_position.x:
-					get_viewport().warp_mouse(event_last_position + Vector2(100.0, 0))
-				else:
-					get_viewport().warp_mouse(event_last_position + Vector2(-100.0, 0))
-				mode = _MODE.SCALE
+		#if event.keycode == KEY_S:
+		#	if event.alt_pressed:
+		#		#reset scale
+		#		var bas = ghost.global_transform.basis
+		#		bas.x = bas.x.normalized()
+		#		bas.y = bas.y.normalized()
+		#		bas.z = bas.z.normalized()
+		#		ghost.global_transform.basis = bas
+		#	else:
+		#		#enter scale mode
+		#		prev_axis = axis
+		#		ghost_initial_transform = ghost.global_transform
+		#		ghost_last_scale = ghost.global_transform.basis.x.length()
+		#		if (get_viewport().get_visible_rect().size.x / 2) > event_last_position.x:
+		#			get_viewport().warp_mouse(event_last_position + Vector2(100.0, 0))
+		#		else:
+		#			get_viewport().warp_mouse(event_last_position + Vector2(-100.0, 0))
+		#		mode = _MODE.SCALE
 	
-	elif event is InputEventMouseButton and event.is_pressed():
+	if event is InputEventMouseButton and event.is_pressed():
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			place_object(ghost, placement_options)
 			stop_input_passthrough = true
@@ -334,41 +343,66 @@ func do_placement(viewport_camera, event):
 func do_rotate(viewport_camera, event):
 	if active_editor:
 		active_editor.set_mode_text("ROTATION")
+				
+	if event is InputEventKey:
+		if event.keycode == KEY_CTRL:
+			if event.is_pressed():
+				gsr_snap = true
+			if event.is_released():
+				gsr_snap = false
+				
 	if event is InputEventKey and event.is_pressed():
 		if event.keycode == KEY_R:
 			mode = _MODE.PLACEMENT
-		if event.keycode == KEY_S:
-			ghost_last_scale = ghost.global_transform.basis.x.length()
-			if (get_viewport().get_visible_rect().size.x / 2) > event_last_position.x:
-				get_viewport().warp_mouse(event_last_position + Vector2(100.0, 0))
-			else:
-				get_viewport().warp_mouse(event_last_position + Vector2(-100.0, 0))
-			mode = _MODE.SCALE
+		if event.keycode == KEY_S and not event.ctrl_pressed:
+			mode = _MODE.PLACEMENT
+		#if event.keycode == KEY_S:
+		#	ghost_last_scale = ghost.global_transform.basis.x.length()
+		#	if (get_viewport().get_visible_rect().size.x / 2) > event_last_position.x:
+		#		get_viewport().warp_mouse(event_last_position + Vector2(100.0, 0))
+		#	else:
+		#		get_viewport().warp_mouse(event_last_position + Vector2(-100.0, 0))
+		#	mode = _MODE.SCALE
 			
 		if event.keycode == KEY_X:
 			axis = _AXIS.X
 		if event.keycode == KEY_Y:
 			axis = _AXIS.Y
 		if event.keycode == KEY_Z:
-			axis = _AXIS.Z
+			if not event.ctrl_pressed:
+				axis = _AXIS.Z
 			
 	elif event is InputEventMouseMotion:
 		if axis == _AXIS.X:
-			ghost.rotation.x += event.relative.x * rotation_speed
+			rotation_x += event.relative.x * rotation_speed
+			var applied_rot = rotation_x
+			if gsr_snap:
+				applied_rot = deg_to_rad( snappedf(rad_to_deg(applied_rot), 15.0) )
+			ghost.rotation.x = wrapf(placement_rotation_init.x + applied_rot, -PI, PI)
 		if axis == _AXIS.Y:
-			ghost.rotation.y += event.relative.x * rotation_speed
+			rotation_y += event.relative.x * rotation_speed
+			var applied_rot = rotation_y
+			if gsr_snap:
+				applied_rot = deg_to_rad( snappedf(rad_to_deg(applied_rot), 15.0) )
+			ghost.rotation.y = wrapf(placement_rotation_init.y + applied_rot, -PI, PI)
 		if axis == _AXIS.Z:
-			ghost.rotation.z += event.relative.x * rotation_speed
+			rotation_z += event.relative.x * rotation_speed
+			var applied_rot = rotation_z
+			if gsr_snap:
+				applied_rot = deg_to_rad( snappedf(rad_to_deg(applied_rot), 15.0) )
+			ghost.rotation.z = wrapf(placement_rotation_init.z + applied_rot, -PI, PI)
 			
 	elif event is InputEventMouseButton :# and event.is_pressed():
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			get_viewport().warp_mouse(event_last_position)
 			mode = _MODE.PLACEMENT
+			axis = prev_axis
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			get_viewport().warp_mouse(event_last_position)
 			ghost.global_transform.basis = ghost_initial_transform.basis
 			mode = _MODE.PLACEMENT
-		stop_input_passthrough = true	
+			axis = prev_axis
+		stop_input_passthrough = true
 
 func do_scale(viewport_camera, event):
 	active_editor.set_mode_text("SCALE")
@@ -392,10 +426,12 @@ func do_scale(viewport_camera, event):
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			get_viewport().warp_mouse(event_last_position)
 			mode = _MODE.PLACEMENT
+			axis = prev_axis
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			get_viewport().warp_mouse(event_last_position)
 			ghost.global_transform.basis = ghost_initial_transform.basis
 			mode = _MODE.PLACEMENT
+			axis = prev_axis
 		stop_input_passthrough = true
 			
 func disable_ghost_collider(node):
@@ -414,6 +450,50 @@ func create_ghost(path):
 	editor_interface.get_edited_scene_root().add_child(ghost)
 	ghost_basis_init = ghost.global_transform.basis
 	
+func get_ghost_basis_align_y(ray_result):
+	var n = ray_result.normal
+	var dot_x = Vector3.RIGHT.dot(n)
+	var dot_y = Vector3.UP.dot(n)
+	var dot_z = Vector3.FORWARD.dot(n)
+	var dot_xx = Vector3.LEFT.dot(n)
+	var dot_yy = Vector3.DOWN.dot(n)
+	var dot_zz = Vector3.BACK.dot(n)
+	var dot_used = max(dot_x, dot_y, dot_z, dot_xx, dot_yy, dot_zz)
+	
+	var bas : Basis = ghost.global_transform.basis
+	
+	if is_equal_approx(dot_used, dot_x):
+		bas.x = Vector3.FORWARD
+		bas.y = Vector3.RIGHT
+		bas.z = Vector3.UP
+	if is_equal_approx(dot_used, dot_y):
+		bas.x = Vector3.RIGHT
+		bas.y = Vector3.UP
+		bas.z = Vector3.FORWARD
+	if is_equal_approx(dot_used, dot_z):
+		bas.x = Vector3.UP
+		bas.y = Vector3.FORWARD
+		bas.z = Vector3.RIGHT
+	if is_equal_approx(dot_used, dot_xx):
+		bas.x = Vector3.FORWARD * -1
+		bas.y = Vector3.RIGHT * -1
+		bas.z = Vector3.UP * -1
+	if is_equal_approx(dot_used, dot_yy):
+		bas.x = Vector3.RIGHT * -1
+		bas.y = Vector3.UP * -1
+		bas.z = Vector3.FORWARD * -1
+	if is_equal_approx(dot_used, dot_zz):
+		bas.x = Vector3.UP * -1
+		bas.y = Vector3.FORWARD * -1
+		bas.z = Vector3.RIGHT * -1
+	
+	bas.y = n
+	bas.x = (bas.x.slide(n)).normalized()
+	bas.z = bas.x.cross(bas.y).normalized()
+
+	return bas
+
+
 func _intersect_with_colliders(camera, screen_point):
 	var from = camera.project_ray_origin(screen_point)
 	var dir = camera.project_ray_normal(screen_point)
@@ -438,15 +518,18 @@ func _intersect_with_plane(camera, screen_point, plane_origin, plane_normal):
 	return result
 
 func place_object(_ghost, _placement_options):
+	
 	var obj = load(ghost_path).instantiate()
 	
-	undo_redo.create_action("add_node")
+	undo_redo = get_undo_redo()
+	undo_redo.create_action("placement_add_node")
 	undo_redo.add_do_method(self, "execute_placement", obj, _ghost, _placement_options)
 	undo_redo.add_undo_method(self, "undo_placement", obj)
 	undo_redo.add_do_reference(obj)
 	undo_redo.commit_action()
 	
 func execute_placement(obj, _ghost, _placement_options):
+	
 	var obj_name = obj.name
 	active_root.add_child(obj)
 	obj.global_transform = _ghost.global_transform
@@ -695,7 +778,7 @@ func commit_gsr():
 		new_transforms[node] = node.global_transform
 	undo_redo.add_do_method(self, "execute_gsr", gsr_objects, new_transforms)
 	undo_redo.add_undo_method(self, "undo_gsr", gsr_objects)
-	undo_redo.add_do_reference(gsr_object)
+	undo_redo.add_do_reference(gsr_objects.keys().front())
 	undo_redo.commit_action()
 	
 func execute_gsr(objs, new_transform):

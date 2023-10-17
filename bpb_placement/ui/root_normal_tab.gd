@@ -26,7 +26,11 @@ var last_selected_path = ""
 func _ready():
 	context_menu.index_pressed.connect(Callable(self, "_on_context_menu_index_pressed"))
 
-
+func toggle_placement():
+	btn_active.button_pressed = not btn_active.button_pressed
+	
+func enable_placement():
+	btn_active.button_pressed = true
 
 func disable_placement():
 	btn_active.button_pressed = false
@@ -73,6 +77,8 @@ func update_item_list():
 		
 func get_preview(path):
 	pass
+	if not editor_interface:
+		return
 	var resource_preview = editor_interface.get_resource_previewer()
 	resource_preview.queue_resource_preview(path, self, "_on_resource_preview", null)
 	

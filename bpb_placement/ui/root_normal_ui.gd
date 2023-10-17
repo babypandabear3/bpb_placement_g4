@@ -53,3 +53,6 @@ func set_mode_text(_par):
 
 func _on_tree_exiting():
 	save_to_file()
+	
+func toggle_placement():
+	tab.get_child(tab.current_tab).toggle_placement()
